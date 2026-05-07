@@ -36,12 +36,6 @@ variable "cost_centre" {
   type        = string
 }
 
-variable "vnet_address_space" {
-  description = "Landing zone VNet address space."
-  type        = set(string)
-  default     = ["10.80.0.0/16"]
-}
-
 variable "sql_mi_administrator_login" {
   description = "Temporary SQL MI administrator login for bootstrap."
   type        = string
@@ -80,6 +74,18 @@ variable "enable_analytics" {
 
 variable "enable_telemetry" {
   description = "Enable Azure Verified Module telemetry."
+  type        = bool
+  default     = true
+}
+
+variable "enable_function_app_vnet_integration" {
+  description = "Wire the Function App to the snet-function-app subnet. Subnet must be pre-provisioned with Microsoft.Web/serverFarms delegation."
+  type        = bool
+  default     = false
+}
+
+variable "manage_purview" {
+  description = "Create the Azure Purview account. PPG allows only one Purview instance per tenancy, so set false in environments where Purview is shared from another deployment."
   type        = bool
   default     = true
 }

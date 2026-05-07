@@ -1,8 +1,8 @@
 output "resource_groups" {
   value = {
-    core      = module.rg_core.name
-    data      = module.rg_data.name
-    analytics = module.rg_analytics.name
+    core      = data.azurerm_resource_group.core.name
+    data      = data.azurerm_resource_group.data.name
+    analytics = data.azurerm_resource_group.analytics.name
   }
 }
 
@@ -11,7 +11,7 @@ output "log_analytics_workspace_id" {
 }
 
 output "virtual_network_id" {
-  value = module.vnet.resource_id
+  value = data.azurerm_virtual_network.vnet.id
 }
 
 output "key_vault_id" {
@@ -28,7 +28,16 @@ output "data_factory_ssis_id" {
 
 output "storage_accounts" {
   value = {
-    adls = module.adls.name
-    blob = module.blob.name
+    adls         = module.adls.name
+    blob         = module.blob.name
+    function_app = module.function_app_storage.name
   }
+}
+
+output "purview_account_id" {
+  value = one(azurerm_purview_account.this[*].id)
+}
+
+output "function_app_id" {
+  value = azurerm_linux_function_app.this.id
 }

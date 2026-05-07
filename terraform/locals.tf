@@ -29,6 +29,11 @@ locals {
 
     adls_account = "ppgadls${var.asset}dp${var.region_code}${var.environment}001"
     blob_account = "ppgabs${var.asset}aae${var.region_code}${var.environment}001"
+
+    purview              = "ppg-apv-${var.asset}-${var.region_code}-001"
+    function_app         = "ppg-afa-${var.asset}-plat-${var.region_code}-${var.environment}-001"
+    function_app_plan    = "ppg-asp-${var.asset}-plat-${var.region_code}-${var.environment}-001"
+    function_app_storage = "ppgst${var.asset}fa${var.region_code}${var.environment}001"
   }
 
   subnet_names = {
@@ -36,5 +41,6 @@ locals {
     private_endpoints = "snet-private-endpoints"
     data_factory      = "snet-data-factory"
     analytics         = "snet-analytics"
+    function_app      = "snet-function-app"
   }
 }

@@ -1,33 +1,51 @@
 data "azurerm_client_config" "current" {}
 
-module "rg_core" {
-  source  = "Azure/avm-res-resources-resourcegroup/azurerm"
-  version = "0.2.2"
-
-  location         = var.location
-  name             = local.names.rg_core
-  enable_telemetry = var.enable_telemetry
-  tags             = local.tags
+data "azurerm_resource_group" "core" {
+  name = local.names.rg_core
 }
 
-module "rg_data" {
-  source  = "Azure/avm-res-resources-resourcegroup/azurerm"
-  version = "0.2.2"
-
-  location         = var.location
-  name             = local.names.rg_data
-  enable_telemetry = var.enable_telemetry
-  tags             = local.tags
+data "azurerm_resource_group" "data" {
+  name = local.names.rg_data
 }
 
-module "rg_analytics" {
-  source  = "Azure/avm-res-resources-resourcegroup/azurerm"
-  version = "0.2.2"
+data "azurerm_resource_group" "analytics" {
+  name = local.names.rg_analytics
+}
 
-  location         = var.location
-  name             = local.names.rg_analytics
-  enable_telemetry = var.enable_telemetry
-  tags             = local.tags
+data "azurerm_virtual_network" "vnet" {
+  name                = local.names.vnet
+  resource_group_name = data.azurerm_resource_group.core.name
+}
+
+data "azurerm_subnet" "sql_mi" {
+  name                 = local.subnet_names.sql_mi
+  virtual_network_name = data.azurerm_virtual_network.vnet.name
+  resource_group_name  = data.azurerm_resource_group.core.name
+}
+
+data "azurerm_subnet" "private_endpoints" {
+  name                 = local.subnet_names.private_endpoints
+  virtual_network_name = data.azurerm_virtual_network.vnet.name
+  resource_group_name  = data.azurerm_resource_group.core.name
+}
+
+data "azurerm_subnet" "data_factory" {
+  name                 = local.subnet_names.data_factory
+  virtual_network_name = data.azurerm_virtual_network.vnet.name
+  resource_group_name  = data.azurerm_resource_group.core.name
+}
+
+data "azurerm_subnet" "analytics" {
+  name                 = local.subnet_names.analytics
+  virtual_network_name = data.azurerm_virtual_network.vnet.name
+  resource_group_name  = data.azurerm_resource_group.core.name
+}
+
+data "azurerm_subnet" "function_app" {
+  count                = var.enable_function_app_vnet_integration ? 1 : 0
+  name                 = local.subnet_names.function_app
+  virtual_network_name = data.azurerm_virtual_network.vnet.name
+  resource_group_name  = data.azurerm_resource_group.core.name
 }
 
 module "log_analytics" {
@@ -36,70 +54,11 @@ module "log_analytics" {
 
   location                                  = var.location
   name                                      = local.names.log_analytics
-  resource_group_name                       = module.rg_core.name
+  resource_group_name                       = data.azurerm_resource_group.core.name
   enable_telemetry                          = var.enable_telemetry
   log_analytics_workspace_retention_in_days = 90
   log_analytics_workspace_sku               = "PerGB2018"
   tags                                      = local.tags
-
-  depends_on = [module.rg_core]
-}
-
-module "vnet" {
-  source  = "Azure/avm-res-network-virtualnetwork/azurerm"
-  version = "0.17.1"
-
-  location         = var.location
-  parent_id        = module.rg_core.resource_id
-  name             = local.names.vnet
-  address_space    = var.vnet_address_space
-  enable_telemetry = var.enable_telemetry
-  tags             = local.tags
-
-  diagnostic_settings = {
-    logs = {
-      workspace_resource_id = module.log_analytics.resource_id
-    }
-  }
-
-  subnets = {
-    sql_mi = {
-      name             = local.subnet_names.sql_mi
-      address_prefixes = ["10.80.1.0/24"]
-      network_security_group = {
-        id = azurerm_network_security_group.sql_mi.id
-      }
-      route_table = {
-        id = azurerm_route_table.sql_mi.id
-      }
-      delegations = [{
-        name = "managedinstancedelegation"
-        service_delegation = {
-          name = "Microsoft.Sql/managedInstances"
-        }
-      }]
-    }
-    private_endpoints = {
-      name                              = local.subnet_names.private_endpoints
-      address_prefixes                  = ["10.80.2.0/24"]
-      private_endpoint_network_policies = "Disabled"
-    }
-    data_factory = {
-      name             = local.subnet_names.data_factory
-      address_prefixes = ["10.80.3.0/24"]
-    }
-    analytics = {
-      name             = local.subnet_names.analytics
-      address_prefixes = ["10.80.4.0/24"]
-    }
-  }
-
-  depends_on = [
-    module.rg_core,
-    module.log_analytics,
-    azurerm_network_security_group.sql_mi,
-    azurerm_route_table.sql_mi
-  ]
 }
 
 module "key_vault" {
@@ -108,13 +67,14 @@ module "key_vault" {
 
   location                      = var.location
   name                          = local.names.key_vault
-  resource_group_name           = module.rg_core.name
+  resource_group_name           = data.azurerm_resource_group.core.name
   tenant_id                     = data.azurerm_client_config.current.tenant_id
   enable_telemetry              = var.enable_telemetry
   public_network_access_enabled = false
   purge_protection_enabled      = true
   sku_name                      = "standard"
   soft_delete_retention_days    = 90
+  legacy_access_policies_enabled = false
   tags                          = local.tags
 
   diagnostic_settings = {
@@ -128,7 +88,14 @@ module "key_vault" {
     default_action = "Deny"
   }
 
-  depends_on = [module.rg_core, module.log_analytics]
+  role_assignments = {
+    deployer_admin = {
+      role_definition_id_or_name = "Key Vault Administrator"
+      principal_id               = data.azurerm_client_config.current.object_id
+    }
+  }
+
+  depends_on = [module.log_analytics]
 }
 
 module "adls" {
@@ -137,7 +104,7 @@ module "adls" {
 
   location                          = var.location
   name                              = local.names.adls_account
-  resource_group_name               = module.rg_data.name
+  resource_group_name               = data.azurerm_resource_group.data.name
   account_kind                      = "StorageV2"
   account_replication_type          = local.is_prod ? "ZRS" : "LRS"
   account_tier                      = "Standard"
@@ -150,6 +117,10 @@ module "adls" {
   enable_telemetry                  = var.enable_telemetry
   tags                              = local.tags
 
+  managed_identities = {
+    system_assigned = true
+  }
+
   diagnostic_settings_blob = {
     logs = {
       workspace_resource_id = module.log_analytics.resource_id
@@ -159,10 +130,10 @@ module "adls" {
   network_rules = {
     bypass                     = ["AzureServices"]
     default_action             = "Deny"
-    virtual_network_subnet_ids = toset(["${module.vnet.resource_id}/subnets/${local.subnet_names.data_factory}", "${module.vnet.resource_id}/subnets/${local.subnet_names.analytics}"])
+    virtual_network_subnet_ids = toset([data.azurerm_subnet.data_factory.id, data.azurerm_subnet.analytics.id])
   }
 
-  depends_on = [module.rg_data, module.vnet, module.log_analytics]
+  depends_on = [module.log_analytics]
 }
 
 module "blob" {
@@ -171,7 +142,7 @@ module "blob" {
 
   location                          = var.location
   name                              = local.names.blob_account
-  resource_group_name               = module.rg_data.name
+  resource_group_name               = data.azurerm_resource_group.data.name
   account_kind                      = "StorageV2"
   account_replication_type          = local.is_prod ? "ZRS" : "LRS"
   account_tier                      = "Standard"
@@ -182,6 +153,10 @@ module "blob" {
   infrastructure_encryption_enabled = true
   enable_telemetry                  = var.enable_telemetry
   tags                              = local.tags
+
+  managed_identities = {
+    system_assigned = true
+  }
 
   containers = {
     aae_project_data = {
@@ -198,10 +173,10 @@ module "blob" {
   network_rules = {
     bypass                     = ["AzureServices"]
     default_action             = "Deny"
-    virtual_network_subnet_ids = toset(["${module.vnet.resource_id}/subnets/${local.subnet_names.data_factory}", "${module.vnet.resource_id}/subnets/${local.subnet_names.analytics}"])
+    virtual_network_subnet_ids = toset([data.azurerm_subnet.data_factory.id, data.azurerm_subnet.analytics.id])
   }
 
-  depends_on = [module.rg_data, module.vnet, module.log_analytics]
+  depends_on = [module.log_analytics]
 }
 
 module "sql_mi" {
@@ -213,10 +188,10 @@ module "sql_mi" {
   license_type                 = "BasePrice"
   location                     = var.location
   name                         = local.names.sql_mi
-  resource_group_name          = module.rg_data.name
+  resource_group_name          = data.azurerm_resource_group.data.name
   sku_name                     = "GP_Gen5"
   storage_size_in_gb           = var.sql_mi_storage_size_in_gb
-  subnet_id                    = "${module.vnet.resource_id}/subnets/${local.subnet_names.sql_mi}"
+  subnet_id                    = data.azurerm_subnet.sql_mi.id
   vcores                       = var.sql_mi_vcores
   minimum_tls_version          = "1.2"
   public_data_endpoint_enabled = false
@@ -235,7 +210,7 @@ module "sql_mi" {
     }
   }
 
-  depends_on = [module.rg_data, module.vnet, module.log_analytics]
+  depends_on = [module.log_analytics]
 }
 
 module "adf_ssis" {
@@ -244,10 +219,11 @@ module "adf_ssis" {
 
   location                        = var.location
   name                            = local.names.adf_ssis
-  resource_group_name             = module.rg_data.name
+  resource_group_name             = data.azurerm_resource_group.data.name
   enable_telemetry                = var.enable_telemetry
   managed_virtual_network_enabled = true
   public_network_enabled          = false
+  purview_id                      = one(azurerm_purview_account.this[*].id)
   tags                            = local.tags
 
   managed_identities = {
@@ -267,7 +243,7 @@ module "adf_ssis" {
     }
   }
 
-  depends_on = [module.rg_data, module.key_vault, module.log_analytics]
+  depends_on = [module.key_vault, module.log_analytics, azurerm_purview_account.this]
 }
 
 module "adf_general" {
@@ -277,10 +253,11 @@ module "adf_general" {
 
   location                        = var.location
   name                            = local.names.adf_general
-  resource_group_name             = module.rg_data.name
+  resource_group_name             = data.azurerm_resource_group.data.name
   enable_telemetry                = var.enable_telemetry
   managed_virtual_network_enabled = true
   public_network_enabled          = false
+  purview_id                      = one(azurerm_purview_account.this[*].id)
   tags                            = local.tags
 
   managed_identities = {
@@ -308,7 +285,7 @@ module "adf_general" {
     }
   }
 
-  depends_on = [module.rg_data, module.key_vault, module.adls, module.log_analytics]
+  depends_on = [module.key_vault, module.adls, module.log_analytics, azurerm_purview_account.this]
 }
 
 module "databricks_lab" {
@@ -318,7 +295,7 @@ module "databricks_lab" {
 
   location                      = var.location
   name                          = local.names.databricks
-  resource_group_name           = module.rg_analytics.name
+  resource_group_name           = data.azurerm_resource_group.analytics.name
   sku                           = "premium"
   public_network_access_enabled = false
   enable_telemetry              = var.enable_telemetry
@@ -330,8 +307,6 @@ module "databricks_lab" {
     compliance_security_profile_standards = []
     enhanced_security_monitoring_enabled  = false
   }
-
-  depends_on = [module.rg_analytics]
 }
 
 module "azureml" {
@@ -341,7 +316,7 @@ module "azureml" {
 
   location                      = var.location
   name                          = local.names.aml_workspace
-  resource_group_name           = module.rg_analytics.name
+  resource_group_name           = data.azurerm_resource_group.analytics.name
   enable_telemetry              = var.enable_telemetry
   public_network_access_enabled = false
   tags                          = local.tags
@@ -356,5 +331,5 @@ module "azureml" {
     system_assigned = true
   }
 
-  depends_on = [module.rg_analytics, module.key_vault, module.blob]
+  depends_on = [module.key_vault, module.blob]
 }
